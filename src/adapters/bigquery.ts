@@ -13,6 +13,22 @@ const eventLog: Array<{
   payload: Record<string, unknown>;
 }> = [];
 
+// Notes from injected failures. Lives in the worker process (where activities
+// run); the workflow consumes these via a separate activity call, since
+// mutating the workflow state from inside an activity doesn't persist.
+const pendingFailureNotes: Array<{ workflowId: string; note: string }> = [];
+
+export function drainFailureNotesFor(workflowId: string): string[] {
+  const mine: string[] = [];
+  for (let i = pendingFailureNotes.length - 1; i >= 0; i--) {
+    if (pendingFailureNotes[i].workflowId === workflowId) {
+      mine.unshift(pendingFailureNotes[i].note);
+      pendingFailureNotes.splice(i, 1);
+    }
+  }
+  return mine;
+}
+
 async function consumeFailureSentinel(): Promise<boolean> {
   try {
     await fs.access(SENTINEL_PATH);
@@ -52,9 +68,10 @@ export async function insertBigQueryEvent(
 ): Promise<string> {
   const shouldFail = await consumeFailureSentinel();
   if (shouldFail) {
-    state.failureNotes.push(
-      `BigQuery write failed once for event "${eventType}" at ${new Date().toISOString()}. Temporal will retry.`,
-    );
+    pendingFailureNotes.push({
+      workflowId: state.workflowId,
+      note: `BigQuery write failed once for event "${eventType}" at ${new Date().toISOString()}. Temporal retried automatically.`,
+    });
     throw new Error(`Injected BigQuery failure for event "${eventType}"`);
   }
 

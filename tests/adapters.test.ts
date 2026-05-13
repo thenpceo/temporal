@@ -6,6 +6,7 @@ import {
   armBigQueryFailure,
   isBigQueryArmed,
   insertBigQueryEvent,
+  drainFailureNotesFor,
 } from "../src/adapters/bigquery";
 import type { SupportEscalationState } from "../src/temporal/types";
 
@@ -72,11 +73,20 @@ describe("BigQuery adapter", () => {
     expect(await isBigQueryArmed()).toBe(true);
 
     const state = buildState();
+    // Drain any pending notes left over from prior tests so the count is clean.
+    drainFailureNotesFor(state.workflowId);
+
     await expect(insertBigQueryEvent(state, "first")).rejects.toThrow(/Injected BigQuery failure/);
 
     const id = await insertBigQueryEvent(state, "second");
     expect(id).toMatch(/^bq-evt-/);
-    expect(state.failureNotes.length).toBeGreaterThan(0);
+
+    // The adapter records failure notes in a process-local buffer (activities
+    // can't mutate workflow state across the worker→workflow boundary). The
+    // workflow drains them via the drainBigQueryFailureNotes activity.
+    const notes = drainFailureNotesFor(state.workflowId);
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes[0]).toMatch(/failed once for event "first"/);
   });
 
   it("records event ID on success", async () => {

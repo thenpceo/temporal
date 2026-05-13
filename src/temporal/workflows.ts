@@ -24,6 +24,7 @@ const {
   createOrUpdateSalesforceCase,
   postSlackEscalation,
   writeBigQueryEvent,
+  drainBigQueryFailureNotes,
   draftCustomerReply,
   generatePlaybookActivity,
 } = proxyActivities<typeof activities>({
@@ -35,6 +36,20 @@ const {
     backoffCoefficient: 2,
   },
 });
+
+// Helper: write a BigQuery event AND pull back any retry notes the adapter
+// recorded for failed attempts during this call. Each activity call is in
+// its own worker process; this is the only way the workflow learns about
+// in-activity retries.
+async function writeBigQueryEventAndCaptureRetries(
+  state: SupportEscalationState,
+  eventType: string,
+): Promise<string> {
+  const id = await writeBigQueryEvent({ state, eventType });
+  const notes = await drainBigQueryFailureNotes(state.workflowId);
+  for (const note of notes) state.failureNotes.push(note);
+  return id;
+}
 
 const { runInvestigation } = proxyActivities<typeof activities>({
   startToCloseTimeout: "3 minutes",
@@ -71,14 +86,14 @@ export async function SupportEscalationWorkflow(
   setHandler(markExecVisibleSignal, async () => {
     state.execVisible = true;
     await postSlackEscalation({ state, eventType: "exec_visible" });
-    const eventId = await writeBigQueryEvent({ state, eventType: "exec_visible" });
+    const eventId = await writeBigQueryEventAndCaptureRetries(state, "exec_visible");
     state.bigQueryEventIds.push(eventId);
   });
 
   setHandler(changePrioritySignal, async (priority) => {
     state.priorityOverride = priority;
     await postSlackEscalation({ state, eventType: "priority_changed" });
-    const eventId = await writeBigQueryEvent({ state, eventType: "priority_changed" });
+    const eventId = await writeBigQueryEventAndCaptureRetries(state, "priority_changed");
     state.bigQueryEventIds.push(eventId);
   });
 
@@ -96,7 +111,7 @@ export async function SupportEscalationWorkflow(
     state.draftReply.status = "approved";
     state.draftReply.approvedAt = new Date().toISOString();
     await postSlackEscalation({ state, eventType: "draft_approved" });
-    const eventId = await writeBigQueryEvent({ state, eventType: "draft_approved" });
+    const eventId = await writeBigQueryEventAndCaptureRetries(state, "draft_approved");
     state.bigQueryEventIds.push(eventId);
   });
 
@@ -135,12 +150,8 @@ export async function SupportEscalationWorkflow(
   });
   state.phase = "notified";
 
-  const startEventId = await writeBigQueryEvent({
-    state,
-    eventType: "workflow_started",
-  });
+  const startEventId = await writeBigQueryEventAndCaptureRetries(state, "workflow_started");
   state.bigQueryEventIds.push(startEventId);
-  state.phase = "analytics_written";
 
   let investigation: InvestigationFindings | undefined;
   if (state.classification.riskLabel === "executive" || state.classification.riskLabel === "urgent") {
@@ -157,7 +168,7 @@ export async function SupportEscalationWorkflow(
       workflowId: `triage-${state.workflowId}`,
     });
     state.investigation = investigation;
-    const investEventId = await writeBigQueryEvent({ state, eventType: "investigation_complete" });
+    const investEventId = await writeBigQueryEventAndCaptureRetries(state, "investigation_complete");
     state.bigQueryEventIds.push(investEventId);
   }
 
@@ -168,7 +179,7 @@ export async function SupportEscalationWorkflow(
     classification: state.classification,
     investigation: investigation?.findings,
   });
-  const draftEventId = await writeBigQueryEvent({ state, eventType: "draft_generated" });
+  const draftEventId = await writeBigQueryEventAndCaptureRetries(state, "draft_generated");
   state.bigQueryEventIds.push(draftEventId);
 
   state.phase = "awaiting_approval";
@@ -180,10 +191,7 @@ export async function SupportEscalationWorkflow(
   state.phase = "waiting_for_resolution";
   await condition(() => state.resolved);
 
-  const resolvedEventId = await writeBigQueryEvent({
-    state,
-    eventType: "workflow_resolved",
-  });
+  const resolvedEventId = await writeBigQueryEventAndCaptureRetries(state, "workflow_resolved");
   state.bigQueryEventIds.push(resolvedEventId);
 
   return state;

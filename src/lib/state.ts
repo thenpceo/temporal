@@ -22,3 +22,9 @@ export function recordWorkflow(entry: RecentWorkflow): void {
 export function listWorkflows(): RecentWorkflow[] {
   return [...(globalAny.__recentWorkflows ?? [])];
 }
+
+export function clearWorkflows(): number {
+  const n = globalAny.__recentWorkflows?.length ?? 0;
+  globalAny.__recentWorkflows = [];
+  return n;
+}

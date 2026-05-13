@@ -23,19 +23,37 @@ interface Props {
 }
 
 export function PhaseTimeline({ phase, hasInvestigation, hasDraft }: Props) {
-  const steps = ORDER.filter((s) => {
-    if (s.phase === "investigating" && !hasInvestigation) return false;
-    if (s.phase === "drafting_reply" && !hasDraft) return false;
-    if (s.phase === "awaiting_approval" && !hasDraft) return false;
-    return true;
-  });
-
-  const idx = steps.findIndex((s) => s.phase === phase);
+  const idx = ORDER.findIndex((s) => s.phase === phase);
 
   return (
     <div className="timeline">
-      {steps.map((step, i) => {
-        const status = i < idx ? "done" : i === idx ? "active" : "pending";
+      {ORDER.map((step, i) => {
+        // Tri-state status: done > active > pending. We also derive a "skipped"
+        // state for steps the workflow chose not to enter (e.g. `investigating`
+        // on a non-executive ticket): when the phase pointer has moved past a
+        // step but its corresponding state never appeared, render it as a
+        // dim "skipped" rather than a confident check.
+        let status: "done" | "active" | "pending" | "skipped";
+        if (i === idx) {
+          status = "active";
+        } else if (i < idx) {
+          if (step.phase === "investigating" && !hasInvestigation) {
+            status = "skipped";
+          } else if (
+            (step.phase === "drafting_reply" ||
+              step.phase === "awaiting_approval") &&
+            !hasDraft &&
+            phase === "resolved"
+          ) {
+            // very rare: workflow resolved before drafting completed
+            status = "skipped";
+          } else {
+            status = "done";
+          }
+        } else {
+          status = "pending";
+        }
+
         return (
           <div key={step.phase} style={{ display: "contents" }}>
             <div className={`timeline-step ${status}`}>
@@ -44,7 +62,7 @@ export function PhaseTimeline({ phase, hasInvestigation, hasDraft }: Props) {
               </div>
               <div className="label">{step.label}</div>
             </div>
-            {i < steps.length - 1 ? (
+            {i < ORDER.length - 1 ? (
               <div className={`timeline-edge ${i < idx ? "done" : ""}`} />
             ) : null}
           </div>

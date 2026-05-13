@@ -563,6 +563,17 @@ button.ghost:hover:not(:disabled) {
   color: white;
 }
 
+.timeline-step.skipped .node {
+  background: transparent;
+  border-color: var(--muted-3);
+  border-style: dashed;
+}
+
+.timeline-step.skipped .label {
+  color: var(--muted-3);
+  text-decoration: line-through;
+}
+
 .timeline-step .label {
   font-size: 0.64rem;
   text-transform: uppercase;

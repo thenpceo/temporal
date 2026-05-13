@@ -1,6 +1,20 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { z } from "zod";
+import { betaZodTool as _betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
+// Use Zod v4 to match the namespace the Anthropic SDK helper uses at runtime for
+// JSON-schema conversion (z.toJSONSchema lives only on zod/v4). The SDK's *type*
+// declarations still import ZodType from "zod" (v3) — that mismatch is purely
+// cosmetic, so wrap betaZodTool to accept any v4 schema.
+import { z } from "zod/v4";
+
+type AnyZodSchema = Parameters<typeof _betaZodTool>[0]["inputSchema"];
+const betaZodTool = _betaZodTool as <S extends z.ZodType>(opts: {
+  name: string;
+  description: string;
+  inputSchema: S;
+  run: (args: z.infer<S>) => Promise<string> | string;
+}) => ReturnType<typeof _betaZodTool>;
+// Reference AnyZodSchema so the export shape stays inferred from the SDK
+void (null as unknown as AnyZodSchema);
 import type {
   PylonTicket,
   SalesforceAccount,

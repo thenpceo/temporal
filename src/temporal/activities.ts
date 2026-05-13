@@ -1,7 +1,7 @@
 import { getPylonTicket } from "../adapters/pylon";
 import { getSalesforceAccountByEmail, upsertSalesforceCase } from "../adapters/salesforce";
 import { sendSlackEscalation } from "../adapters/slack";
-import { insertBigQueryEvent, getBigQueryEvents } from "../adapters/bigquery";
+import { insertBigQueryEvent, getBigQueryEvents, drainFailureNotesFor } from "../adapters/bigquery";
 import {
   classifyTicketWithLLM,
   draftCustomerReply as llmDraftCustomerReply,
@@ -58,6 +58,13 @@ export async function writeBigQueryEvent(input: {
   eventType: string;
 }): Promise<string> {
   return insertBigQueryEvent(input.state, input.eventType);
+}
+
+// Reads any failure notes the BigQuery adapter recorded for this workflow
+// during its retried attempts, then clears them. Workflow calls this after
+// every writeBigQueryEvent so the dashboard "Retry log" panel populates.
+export async function drainBigQueryFailureNotes(workflowId: string): Promise<string[]> {
+  return drainFailureNotesFor(workflowId);
 }
 
 export async function runInvestigation(input: {
